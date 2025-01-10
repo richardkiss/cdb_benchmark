@@ -1,0 +1,60 @@
+Ideas for a v3 version of the DB that has better performance characteristics.
+
+
+* coin_record
+
+
+
+TODO:
+
+- iterate over table by `coin_confirmed_index`
+  - group and add to `coin_block_group` table
+    - spend_list / confirm_list
+- iterate over table by `coin_spent_index`
+
+- build cb-replay.txt file format:
+
+
+CB-REPLAY.TXT FORMAT:
+
+B block_index timestamp spend_count confirm_count
+S (spend hex)
+...
+C (parent hex) (puzzle hex) amount
+...
+
+
+* Replayer benchmark:
+
+** API:
+
+
+class BlockSpendInfo:
+    timestamp: int
+    spends: list[bytes32]
+    confirms: list[Coin]
+
+class CoinInfo:
+    coin: Coin
+    confirmed_index: int
+    spent_index: int
+
+class Replayer(Protocol):
+
+    def accept_block(block_spend_info: BlockSpendInfo) -> int:
+        pass
+
+    def coin_info_for_coin_name(coin_name: bytes32) -> CoinInfo:
+        pass
+
+    def block_info_for_block_index(block_index: int) -> BlockSpendInfo:
+        pass
+   
+    def rewind_to_block_index(block_index: int) -> None:
+        pass
+
+
+* NOTES:
+
+Inserting into `coin_ids_by_hash` is slow IF inserting in `confirmed_index` order and index exists.
+So confirm index at the end. We can group by `confirmed_index` and store these values in a separate table.
