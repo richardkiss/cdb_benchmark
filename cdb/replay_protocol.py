@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Iterable, Protocol
 
 import hashlib
 
@@ -18,25 +18,29 @@ def as_clvm_int(v: int) -> bytes:
     if v < 128:
         return bytes([v])
     size = 1 + v.bit_length() // 8
-    return bytes([size | 0x80]) + v.to_bytes(size, "big", signed=True)
+    return v.to_bytes(size, "big", signed=True)
 
 
 @dataclass
 class Coin:
-    parent_coin_info: bytes32
+    parent_coin_name: bytes32
     puzzle_hash: bytes32
     amount: int
+
+    def __hash__(self) -> int:
+        return hash(self.name())
 
     def name(self) -> bytes32:
         return bytes32(
             hashlib.sha256(
-                self.parent_coin_info + self.puzzle_hash + as_clvm_int(self.amount)
+                self.parent_coin_name + self.puzzle_hash + as_clvm_int(self.amount)
             ).digest()
         )
 
 
 @dataclass
 class BlockSpendInfo:
+    index: int
     timestamp: int
     spends: list[bytes32]
     confirms: list[Coin]
@@ -50,14 +54,17 @@ class CoinInfo:
 
 
 class Replayer(Protocol):
-    def accept_block(self, block_spend_info: BlockSpendInfo) -> int:
+    def accept_block(self, block_spend_info: BlockSpendInfo) -> None:
         pass
 
-    def coin_info_for_coin_name(self, coin_name: bytes32) -> CoinInfo:
+    def coin_infos_for_coin_names(self, coin_name: list[bytes32]) -> list[CoinInfo]:
         pass
 
     def block_info_for_block_index(self, block_index: int) -> BlockSpendInfo:
         pass
 
     def rewind_to_block_index(self, block_index: int) -> None:
+        pass
+
+    def blocks(self) -> Iterable[BlockSpendInfo]:
         pass

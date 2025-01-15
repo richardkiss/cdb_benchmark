@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "setuptools_scm[toml]>=3.5.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name="cdb"
+version = "0.0.1"
+

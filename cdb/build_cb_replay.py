@@ -1,8 +1,6 @@
-from dataclasses import dataclass
-from typing import Any, Protocol, TextIO
+from typing import Any, TextIO
 
 import argparse
-import hashlib
 import sqlite3
 import sys
 
@@ -30,14 +28,14 @@ def print_block_replay(
         print(f"S {spend.hex()}", file=f)
     for confirm in block_spend_info.confirms:
         print(
-            f"C {confirm.parent_coin_info.hex()} {confirm.puzzle_hash.hex()} {confirm.amount}",
+            f"C {confirm.parent_coin_name.hex()} {confirm.puzzle_hash.hex()} {confirm.amount} {confirm.name().hex()}",
             file=f,
         )
 
 
 def coin_for_row(row: tuple[Any, ...]) -> Coin:
     return Coin(
-        parent_coin_info=row[1],
+        parent_coin_name=row[1],
         puzzle_hash=row[2],
         amount=int.from_bytes(row[3], "big"),
     )
@@ -57,36 +55,41 @@ def build_cb_replay(source_db: str, max_block_index: int) -> None:
         "SELECT coin_name, spent_index, confirmed_index FROM coin_record where spent_index > 0 order by spent_index"
     )
 
-    block_index = 1
+    block_index = 0
 
-    confirm_coin_rows = []
+    confirm_coin_rows = [confirm_cursor.fetchone()]
     spent_coin_rows = [spent_cursor.fetchone()]
     while block_index < max_block_index:
+        block_index += 1
         while True:
-            row = confirm_cursor.fetchone()
+            row = confirm_coin_rows.pop()
             if row[0] != block_index:
                 break
             confirm_coin_rows.append(row)
+            confirm_coin_rows.append(confirm_cursor.fetchone())
+        if len(confirm_coin_rows) == 0:
+            confirm_coin_rows = [row]
+            continue
         confirm_coins = [coin_for_row(_) for _ in confirm_coin_rows]
         timestamp = confirm_coin_rows[0][-1]
         confirm_coin_rows = [row]
 
-        row = spent_coin_rows.pop()
         while True:
+            row = spent_coin_rows.pop()
             if row[1] != block_index:
                 break
             spent_coin_rows.append(row)
-            row = spent_cursor.fetchone()
+            spent_coin_rows.append(spent_cursor.fetchone())
         spent_coin_names = [_[0] for _ in spent_coin_rows]
         spent_coin_rows = [row]
 
         block_spend_info = BlockSpendInfo(
+            index=block_index,
             timestamp=timestamp,
             spends=spent_coin_names,
             confirms=confirm_coins,
         )
         print_block_replay(block_index, block_spend_info, f)
-        block_index += 1
 
 
 def main() -> None:
