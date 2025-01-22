@@ -5,11 +5,11 @@ import importlib
 import sys
 
 
-from .replay_protocol import BlockSpendInfo, Replayer
+from .schema import BlockSpendInfo, Schema
 
 
-def instantiate_replayer(module_with_replayer: str) -> Replayer:
-    module_name, _class = module_with_replayer.split(":")
+def instantiate_schema(module_with_schema: str) -> Schema:
+    module_name, _class = module_with_schema.split(":")
 
     module = importlib.import_module(module_name)
     v = getattr(module, _class)
@@ -45,9 +45,9 @@ def print_block_replay(
         )
 
 
-def dump_replay(f: TextIO, module_with_replayer: str, max_block_index: int) -> None:
-    replayer = instantiate_replayer(module_with_replayer)
-    for block_info in replayer.blocks():
+def dump_blocks(f: TextIO, module_with_schema: str, max_block_index: int) -> None:
+    schema = instantiate_schema(module_with_schema)
+    for block_info in schema.blocks():
         block_index = block_info.index
         if block_index > max_block_index:
             break
@@ -55,7 +55,7 @@ def dump_replay(f: TextIO, module_with_replayer: str, max_block_index: int) -> N
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build cb-replay file.")
+    parser = argparse.ArgumentParser(description="Build a coin schema dump.")
     parser.add_argument(
         "--max-blocks",
         type=int,
@@ -63,12 +63,12 @@ def main() -> None:
         help="Maximum number of blocks to process.",
     )
     parser.add_argument(
-        "module_with_replayer",
+        "module_with_schema",
         type=str,
-        help="Module with Replayer. foo.bar:ReplayClass",
+        help="Module with `Schema` instance. foo.bar:SchemaInstance",
     )
     args = parser.parse_args()
-    dump_replay(sys.stdout, args.module_with_replayer, args.max_blocks)
+    dump_blocks(sys.stdout, args.module_with_schema, args.max_blocks)
 
 
 if __name__ == "__main__":

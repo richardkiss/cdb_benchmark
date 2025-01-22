@@ -53,18 +53,13 @@ class CoinInfo:
     spent_index: int
 
 
-class Replayer(Protocol):
-    def accept_block(self, block_spend_info: BlockSpendInfo) -> None:
-        pass
+class Schema(Protocol):
+    def accept_block(self, block_spend_info: BlockSpendInfo) -> None: ...
 
-    def coin_infos_for_coin_names(self, coin_name: list[bytes32]) -> list[CoinInfo]:
-        pass
+    def coin_infos_for_coin_names(self, coin_name: list[bytes32]) -> list[CoinInfo]: ...
 
-    def block_info_for_block_index(self, block_index: int) -> BlockSpendInfo:
-        pass
+    def block_info_for_block_index(self, block_index: int) -> BlockSpendInfo: ...
 
-    def rewind_to_block_index(self, block_index: int) -> None:
-        pass
+    def rewind_to_block_index(self, block_index: int) -> None: ...
 
-    def blocks(self) -> Iterable[BlockSpendInfo]:
-        pass
+    def blocks(self) -> Iterable[BlockSpendInfo]: ...

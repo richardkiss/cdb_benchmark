@@ -1,20 +1,20 @@
-from .replay_protocol import Replayer, BlockSpendInfo, CoinInfo, bytes32
+from typing import Iterable
+
+from .schema import Schema, BlockSpendInfo, CoinInfo, bytes32
 
 
-__all__ = ["PRINT_REPLAY", "PrintReplay"]
+__all__ = ["PRINT"]
 
 
-class PrintReplay(Replayer):
+class Print(Schema):
     def __init__(self):
-        self._block_index = 0
-
-    def accept_block(self, block_spend_info: BlockSpendInfo) -> int:
-        print(block_spend_info)
-        self._block_index += 1
-        return self._block_index
-
-    def coin_info_for_coin_name(self, coin_name: bytes32) -> CoinInfo:
         pass
+
+    def accept_block(self, block_spend_info: BlockSpendInfo) -> None:
+        print(block_spend_info)
+
+    def coin_infos_for_coin_names(self, coin_name: list[bytes32]) -> list[CoinInfo]:
+        return []
 
     def block_info_for_block_index(self, block_index: int) -> BlockSpendInfo:
         pass
@@ -22,5 +22,8 @@ class PrintReplay(Replayer):
     def rewind_to_block_index(self, block_index: int) -> None:
         pass
 
+    def blocks(self) -> Iterable[BlockSpendInfo]:
+        return []
 
-PRINT_REPLAY = PrintReplay()
+
+PRINT = Print()

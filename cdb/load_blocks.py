@@ -4,7 +4,7 @@ import argparse
 import importlib
 import sys
 
-from .replay_protocol import BlockSpendInfo, Coin, Replayer, bytes32
+from .schema import BlockSpendInfo, Coin, Schema, bytes32
 
 """
 B block_index timestamp spend_count confirm_count
@@ -15,7 +15,7 @@ C (parent hex) (puzzle hex) amount
 """
 
 
-def parse_blocks(f: TextIO) -> Iterable[tuple[int, BlockSpendInfo]]:
+def parse_blocks(f: TextIO) -> Iterable[BlockSpendInfo]:
     while True:
         line = f.readline()
         if not line:
@@ -44,35 +44,34 @@ def parse_blocks(f: TextIO) -> Iterable[tuple[int, BlockSpendInfo]]:
             block_spend_info = BlockSpendInfo(
                 block_index, timestamp=timestamp, spends=spends, confirms=confirms
             )
-            yield block_index, block_spend_info
+            yield block_spend_info
         else:
             raise ValueError(f"Unexpected line: {line}")
 
 
-def instantiate_replayer(module_with_replayer: str) -> Replayer:
-    module_name, _class = module_with_replayer.split(":")
+def instantiate_schema(module_with_schema: str) -> Schema:
+    module_name, _class = module_with_schema.split(":")
 
     module = importlib.import_module(module_name)
     v = getattr(module, _class)
     return v
 
 
-def benchmark_cb_replay(
-    f: TextIO, module_with_replayer: str, max_block_index: int
-) -> None:
-    replayer = instantiate_replayer(module_with_replayer)
+def load_blocks(f: TextIO, module_with_schema: str, max_block_index: int) -> None:
+    schema = instantiate_schema(module_with_schema)
     last_block_index = 0
-    for block_index, block_spend_info in parse_blocks(f):
+    for block_spend_info in parse_blocks(f):
+        block_index = block_spend_info.index
         if block_index > max_block_index:
             break
         if last_block_index // 1000 < block_index // 1000:
             print(f"accepted block {block_index}")
-        replayer.accept_block(block_spend_info)
+        schema.accept_block(block_spend_info)
         last_block_index = block_index
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark a cb-replay.")
+    parser = argparse.ArgumentParser(description="Benchmark a coin schema.")
     parser.add_argument(
         "-i",
         "--input",
@@ -87,14 +86,14 @@ def main() -> None:
         help="Maximum number of blocks to process.",
     )
     parser.add_argument(
-        "module_with_replayer",
+        "module_with_schema",
         type=str,
-        help="Module with Replayer. foo.bar:ReplayClass",
+        help="Module with `Schema` instance. foo.bar:SchemaInstance",
     )
 
     args = parser.parse_args()
 
-    benchmark_cb_replay(args.input, args.module_with_replayer, args.max_blocks)
+    load_blocks(args.input, args.module_with_schema, args.max_blocks)
 
 
 if __name__ == "__main__":
