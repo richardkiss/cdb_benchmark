@@ -68,6 +68,7 @@ def load_blocks(f: TextIO, module_with_schema: str, max_block_index: int) -> Non
             print(f"accepted block {block_index}")
         schema.accept_block(block_spend_info)
         last_block_index = block_index
+    schema.flush()
 
 
 def main() -> None:

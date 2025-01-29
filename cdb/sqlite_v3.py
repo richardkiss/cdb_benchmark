@@ -1,9 +1,9 @@
-from typing import Callable, Iterable, List, Set, TypeVar
+from typing import Iterable, TypeVar
 
 import pathlib
 import sqlite3
 
-from .schema import Schema, BlockSpendInfo, CoinInfo, Coin, bytes32
+from .schema import Schema, BlockSpendInfo, CoinInfo, Coin, bytes32, topological_sort
 
 
 __all__ = ["REPLAY"]
@@ -28,8 +28,12 @@ def list_int_from_bytes(b: bytes) -> list[int]:
     return [int.from_bytes(b[i : i + 8], "big") for i in range(0, len(b), 8)]
 
 
+def is_coinbase_name(coin_name: bytes32) -> bool:
+    return all(_ == 0 for _ in coin_name[16:24])
+
+
 def as_coinbase_index(coin_name: bytes32) -> None | int:
-    if all(_ == 0 for _ in coin_name[16:24]):
+    if is_coinbase_name(coin_name):
         prefix_index = COINBASE_PREFIX_LOOKUP.get(coin_name[:16])
         if prefix_index is None:
             return None
@@ -46,49 +50,6 @@ def bytes32_for_negative_coin_index(coin_index: int) -> bytes32:
     prefix = COINBASE_PREFIXES[prefix_index]
     v = coin_index >> 8
     return bytes32(prefix + v.to_bytes(16, "big"))
-
-
-def topological_sort(
-    objects: Set[T], fetch_dependencies: Callable[[T], Iterable[T]]
-) -> List[T]:
-    """
-    Perform a topological sort on a set of objects with dependencies.
-
-    Args:
-        objects: A set of objects to sort.
-        fetch_dependencies: A function that returns the dependencies of a given object.
-
-    Returns:
-        A list of objects in a valid processing order.
-    """
-    # Result list to store the sorted order
-    result: List[T] = []
-    # Set to keep track of visited nodes to avoid reprocessing
-    visited: Set[T] = set()
-    # Set to detect cycles (temporary marking during DFS)
-    temp_marked: Set[T] = set()
-
-    def visit(node: T) -> None:
-        """
-        Recursive helper function to perform DFS and add nodes to the result.
-        """
-        if node in temp_marked:
-            raise ValueError("Cycle detected in the dependency graph")
-        if node not in visited:
-            temp_marked.add(node)
-            # Fetch dependencies and visit them recursively
-            for dependency in fetch_dependencies(node):
-                visit(dependency)
-            temp_marked.remove(node)
-            visited.add(node)
-            result.append(node)
-
-    # Iterate over all objects and start DFS if not visited
-    for obj in objects:
-        if obj not in visited:
-            visit(obj)
-
-    return result
 
 
 class SQLiteReplay(Schema):
@@ -113,18 +74,38 @@ class SQLiteReplay(Schema):
         self._conn.execute(
             "CREATE TABLE if not exists block (id INTEGER, timestamp INTEGER, spends BLOB, confirms BLOB)"
         )
+        self._pending_blocks: list[BlockSpendInfo] = []
+        self._pending_coin_count = 0
+        self._cache_size = 50000
 
     def accept_block(self, block_spend_info: BlockSpendInfo) -> None:
+        self._pending_blocks.append(block_spend_info)
+        self._pending_coin_count += len(block_spend_info.confirms)
+        if self._pending_coin_count > self._cache_size:
+            self.flush()
+
+    def flush(self) -> None:
+        self._conn.execute("BEGIN TRANSACTION")
+        for block in self._pending_blocks:
+            self._store_block(block)
+        self._pending_coin_count = 0
+        self._pending_blocks = []
+        self._conn.commit()
+
+    def _store_block(self, block_spend_info: BlockSpendInfo) -> None:
+        cursor = self._conn.cursor()
         # first, we add all the spends to the coin table
         block_index = block_spend_info.index
-        cursor = self._conn.cursor()
         # then we add the confirms to the coin table
         # get all the parent coin ids
         confirm_ids = []
 
         if block_spend_info.index == 9_225698:
             breakpoint()
-        coin_by_name = {_.name(): _ for _ in block_spend_info.confirms}
+
+        coin_by_name: dict[bytes32, Coin] = {
+            _.name(): _ for _ in block_spend_info.confirms
+        }
         parent_names = [_.parent_coin_name for _ in block_spend_info.confirms]
         coin_ids_by_name: dict[bytes32, int] = self.fetch_coin_indices_for_coin_names(
             parent_names
@@ -132,7 +113,9 @@ class SQLiteReplay(Schema):
 
         sorted_confirms = topological_sort(
             set(block_spend_info.confirms),
-            lambda _: [coin_by_name[_]] if _.parent_coin_name in coin_by_name else [],
+            lambda _: [coin_by_name[_.parent_coin_name]]
+            if _.parent_coin_name in coin_by_name
+            else [],
         )
 
         for coin in sorted_confirms:
@@ -178,9 +161,6 @@ class SQLiteReplay(Schema):
                 confirms_as_blob,
             ),
         )
-
-        self._conn.commit()
-        cursor.close()
 
     def coin_infos_for_coin_names(self, coin_names: list[bytes32]) -> list[CoinInfo]:
         pass
