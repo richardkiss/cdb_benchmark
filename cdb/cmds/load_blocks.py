@@ -4,7 +4,7 @@ import argparse
 import importlib
 import sys
 
-from .schema import BlockSpendInfo, Coin, Schema, bytes32
+from cdb.schema import BlockSpendInfo, Coin, Schema, bytes32
 
 """
 B block_index timestamp spend_count confirm_count

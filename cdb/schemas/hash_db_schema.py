@@ -1,12 +1,28 @@
-from typing import Iterable, TypeVar
+from typing import Iterable, TypeVar, Type
 
 import pathlib
 import sqlite3
 
-from .schema import Schema, BlockSpendInfo, CoinInfo, Coin, bytes32, topological_sort
+# from .hash_db import HashDB, Row, HashDBProtocol
 
+from cdb.row_array_storage import RowArrayStorage
+from cdb.hashdb.sqlite3_row_array_storage import SQLite3RowStorage
 
-__all__ = ["REPLAY"]
+from cdb.hashdb.flat_file_array_storage import FlatFileDB
+
+# from .flat_file_db import FlatFileDB as HashDB, Row
+from cdb.schema import (
+    Schema,
+    BlockSpendInfo,
+    CoinInfo,
+    Coin,
+    bytes32,
+    topological_sort,
+    Row,
+)
+
+from cdb.hashdb.row_array_db import RowArrayDB
+
 
 # Define a TypeVar for the objects
 T = TypeVar("T")
@@ -19,6 +35,7 @@ COINBASE_PREFIXES = [
 
 COINBASE_PREFIX_LOOKUP = {_[1]: _[0] for _ in enumerate(COINBASE_PREFIXES)}
 
+DEBUG_COIN = bytes32.fromhex("75043187b316d5f8d5a9dd8bfb26058e57db4f741e3404557b14525600685c94")
 
 def list_int_to_bytes(items: list[int]) -> bytes:
     return b"".join(x.to_bytes(8, "big") for x in items)
@@ -52,20 +69,24 @@ def bytes32_for_negative_coin_index(coin_index: int) -> bytes32:
     return bytes32(prefix + v.to_bytes(16, "big"))
 
 
-class SQLiteReplay(Schema):
-    def __init__(self, path: pathlib.Path):
-        self._conn = sqlite3.connect(path)
+class BaseDBSchema(Schema):
+    def __init__(
+        self, path: pathlib.Path, row_array_storage_class: Type[RowArrayStorage]
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+        self._row_array_db = RowArrayDB(path, row_array_storage_class)
+        self._path = path
+
+        self._sql_db_path = path / "hash_db_schema.db"
+        self._conn = sqlite3.connect(self._sql_db_path)
         #
-        # we have two coin tables:
-        #    coin_lookup: just a u64 id autoincrement and a bytes32 hash. There is an index on the bytes32
+        # we have one coin table:
         #    coin: a u64 id, a parent hash (foreign key to coin_lookup, or negative values have special meanings);
         #      a puzzle hash; an amount; a confirm_index; and a spent_index
         #
         # We could aggregate puzzle hashes like we do coin names, but that can come later
 
-        self._conn.execute(
-            "CREATE TABLE if not exists coin_lookup (hash BLOB PRIMARY KEY, id INTEGER)"
-        )
         self._conn.execute(
             "CREATE TABLE if not exists coin (id INTEGER PRIMARY KEY AUTOINCREMENT, parent INTEGER, puzzle BLOB, amount BLOB, confirmed INTEGER, spent INTEGER)"
         )
@@ -74,6 +95,9 @@ class SQLiteReplay(Schema):
         self._conn.execute(
             "CREATE TABLE if not exists block (id INTEGER, timestamp INTEGER, spends BLOB, confirms BLOB)"
         )
+
+        # coin lookup table is the HashDB
+
         self._pending_blocks: list[BlockSpendInfo] = []
         self._pending_coin_count = 0
         self._cache_size = 50000
@@ -85,14 +109,37 @@ class SQLiteReplay(Schema):
             self.flush()
 
     def flush(self) -> None:
+        unflushed_coin_lookup: dict[bytes32, int] = {}
         self._conn.execute("BEGIN TRANSACTION")
         for block in self._pending_blocks:
-            self._store_block(block)
+            self._store_block(block, unflushed_coin_lookup)
+        self._flush_coin_lookup(unflushed_coin_lookup)
         self._pending_coin_count = 0
         self._pending_blocks = []
         self._conn.commit()
 
-    def _store_block(self, block_spend_info: BlockSpendInfo) -> None:
+    def _flush_coin_lookup(self, unflushed_coin_lookup: dict[bytes32, int]) -> None:
+        rows: list[Row] = list(unflushed_coin_lookup.items())
+        self._row_array_db.add_rows(rows)
+
+    def _lookup_name_id_tuples_for_coin_names(
+        self, coin_names: list[bytes32], unflushed_coin_lookup: dict[bytes32, int]
+    ) -> tuple[list[tuple[bytes32, int]], list[bytes32]]:
+        name_id_tuples = []
+        missing_coin_names = []
+        for coin_name in coin_names:
+            v = unflushed_coin_lookup.get(coin_name)
+            if v is None:
+                missing_coin_names.append(coin_name)
+            else:
+                name_id_tuples.append((coin_name, v))
+        return name_id_tuples, missing_coin_names
+
+    def _store_block(
+        self,
+        block_spend_info: BlockSpendInfo,
+        unflushed_coin_lookup: dict[bytes32, int],
+    ) -> None:
         cursor = self._conn.cursor()
         # first, we add all the spends to the coin table
         block_index = block_spend_info.index
@@ -107,9 +154,14 @@ class SQLiteReplay(Schema):
             _.name(): _ for _ in block_spend_info.confirms
         }
         parent_names = [_.parent_coin_name for _ in block_spend_info.confirms]
-        coin_ids_by_name: dict[bytes32, int] = self.fetch_coin_indices_for_coin_names(
-            parent_names
+        name_id_tuples, missing_coin_names = self._lookup_name_id_tuples_for_coin_names(
+            parent_names, unflushed_coin_lookup
         )
+
+        coin_ids_by_name: dict[bytes32, int] = self._fetch_coin_indices_for_coin_names(
+            missing_coin_names, unflushed_coin_lookup
+        )
+        coin_ids_by_name.update(dict(name_id_tuples))
 
         sorted_confirms = topological_sort(
             set(block_spend_info.confirms),
@@ -124,6 +176,7 @@ class SQLiteReplay(Schema):
             if parent_index is None:
                 parent_index = coin_ids_by_name.get(pcn)
             if parent_index is None:
+                breakpoint()
                 raise ValueError(f"can't find coin id for parent coin {pcn}")
 
             coin_name = coin.name()
@@ -135,18 +188,16 @@ class SQLiteReplay(Schema):
             )
             coin_lookup_index = cursor.lastrowid
             assert coin_lookup_index is not None
-            cursor.execute(
-                "INSERT INTO coin_lookup (hash, id) VALUES (?, ?)",
-                (coin_name, coin_lookup_index),
-            )
-            assert cursor.lastrowid == coin_lookup_index
+            unflushed_coin_lookup[coin_name] = coin_lookup_index
             confirm_ids.append(coin_lookup_index)
             coin_ids_by_name[coin_name] = coin_lookup_index
 
-        spend_ids = [
-            self.coin_index_for_coin_name(_, coin_ids_by_name)
-            for _ in block_spend_info.spends
-        ]
+        spend_id_by_name = self._fetch_coin_indices_for_coin_names(
+            block_spend_info.spends, unflushed_coin_lookup
+        )
+        spend_ids = [_[1] for _ in spend_id_by_name.items()]
+
+        # TODO: do the `INSERT` above with the correct value
         for _ in spend_ids:
             cursor.execute("UPDATE coin SET spent=? WHERE id=?", (block_index, _))
 
@@ -163,27 +214,44 @@ class SQLiteReplay(Schema):
         )
 
     def coin_infos_for_coin_names(self, coin_names: list[bytes32]) -> list[CoinInfo]:
-        pass
+        return []
 
-    def block_info_for_block_index(self, block_index: int) -> BlockSpendInfo:
-        pass
+    def block_info_for_block_index(self, block_index: int) -> None | BlockSpendInfo:
+        return None
 
     def rewind_to_block_index(self, block_index: int) -> None:
         pass
 
     ###
 
-    def fetch_coin_indices_for_coin_names(
-        self, coin_names: list[bytes32]
+    def _fetch_coin_indices_for_coin_names(
+        self, coin_names: list[bytes32], unflushed_coin_lookup: dict[bytes32, int]
     ) -> dict[bytes32, int]:
-        cursor = self._conn.cursor()
-        q_marks = ",".join("?" for _ in coin_names)
-        cursor.execute(
-            f"SELECT hash, id FROM coin_lookup where hash in ({q_marks})", coin_names
-        )
-        return {_[0]: _[1] for _ in cursor}
+        coin_names_remaining = []
 
-    def coin_index_for_coin_name(
+        d = {}
+        for coin_name in coin_names:
+            if is_coinbase_name(coin_name):
+                v = as_coinbase_index(coin_name)
+            else:
+                v = unflushed_coin_lookup.get(coin_name)
+            if v is None:
+                coin_names_remaining.append(coin_name)
+            else:
+                d[coin_name] = v
+        #if DEBUG_COIN in coin_names_remaining:
+        #    breakpoint()
+        #    self._row_array_db.find_hashes([DEBUG_COIN])
+        d1 = dict(self._row_array_db.find_hashes(coin_names_remaining))
+        d.update(d1)
+        if set(d.keys()) != set(coin_names):
+            missing = set(coin_names) - set(d.keys())
+            print(f"missing {missing}")
+            breakpoint()
+
+        return d
+
+    def _coin_index_for_coin_name(
         self, coin_name: bytes32, coin_lookup: dict[bytes32, int] = {}
     ) -> int:
         if coin_name in coin_lookup:
@@ -192,10 +260,10 @@ class SQLiteReplay(Schema):
         cursor.execute("SELECT id FROM coin_lookup WHERE hash=?", (coin_name,))
         return cursor.fetchone()[0]
 
-    def coin_name_for_coin_index(self, coin_index: int) -> bytes32:
-        return self.coin_names_for_coin_indices([coin_index])[0]
+    def _coin_name_for_coin_index(self, coin_index: int) -> bytes32:
+        return self._coin_names_for_coin_indices([coin_index])[0]
 
-    def coin_names_for_coin_indices(self, coin_indices: list[int]) -> list[bytes32]:
+    def _coin_names_for_coin_indices(self, coin_indices: list[int]) -> list[bytes32]:
         lookup: dict[int, bytes32] = {}
         pos_coin_indices = []
         for coin_index in coin_indices:
@@ -213,7 +281,7 @@ class SQLiteReplay(Schema):
             lookup[row[0]] = row[1]
         return [lookup[_] for _ in coin_indices]
 
-    def coin_infos_for_coin_indices(self, coin_indices: list[int]) -> list[CoinInfo]:
+    def _coin_infos_for_coin_indices(self, coin_indices: list[int]) -> list[CoinInfo]:
         lookup: dict[int, CoinInfo] = {}
         cursor = self._conn.cursor()
         q_marks = ",".join("?" for _ in coin_indices)
@@ -223,7 +291,7 @@ class SQLiteReplay(Schema):
         )
         rows = list(cursor)
         parent_ids = [_[1] for _ in rows]
-        parent_coin_names = self.coin_names_for_coin_indices(parent_ids)
+        parent_coin_names = self._coin_names_for_coin_indices(parent_ids)
         for row, parent_coin_name in zip(rows, parent_coin_names):
             lookup[row[0]] = CoinInfo(
                 coin=Coin(
@@ -236,8 +304,8 @@ class SQLiteReplay(Schema):
             )
         return [lookup[_] for _ in coin_indices]
 
-    def coins_for_coin_indices(self, coin_indices: list[int]) -> list[Coin]:
-        return [_.coin for _ in self.coin_infos_for_coin_indices(coin_indices)]
+    def _coins_for_coin_indices(self, coin_indices: list[int]) -> list[Coin]:
+        return [_.coin for _ in self._coin_infos_for_coin_indices(coin_indices)]
 
     def blocks(self) -> Iterable[BlockSpendInfo]:
         cursor = self._conn.cursor()
@@ -246,14 +314,16 @@ class SQLiteReplay(Schema):
             block_index = row[0]
             timestamp = row[1]
             spend_ids = list_int_from_bytes(row[2])
-            spends = self.coin_names_for_coin_indices(spend_ids)
+            spends = self._coin_names_for_coin_indices(spend_ids)
             confirm_ids = list_int_from_bytes(row[3])
-            confirms = self.coins_for_coin_indices(confirm_ids)
+            confirms = self._coins_for_coin_indices(confirm_ids)
             yield BlockSpendInfo(block_index, timestamp, spends, confirms)
 
 
-PATH = pathlib.Path("./coin_db_v3.db")
+PATH = pathlib.Path("./hash_db_root")
 # if PATH.exists():
 #    raise FileExistsError(f"{PATH} already exists")
 
-REPLAY = SQLiteReplay(PATH)
+FFREPLAY = BaseDBSchema(PATH, FlatFileDB)
+
+SQLREPLAY = BaseDBSchema(PATH, SQLite3RowStorage)

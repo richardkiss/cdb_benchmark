@@ -12,6 +12,9 @@ class bytes32(bytes):
         return self.hex()
 
 
+Row = tuple[bytes32, int]
+
+
 def as_clvm_int(v: int) -> bytes:
     if v == 0:
         return b""
@@ -21,21 +24,23 @@ def as_clvm_int(v: int) -> bytes:
     return v.to_bytes(size, "big", signed=True)
 
 
-@dataclass
+POISON = bytes32.fromhex("166894134a1b956cccaacd6d6bec503e5975d5a2e7c803677ca6671853b07084") + b"\x00"
+
+@dataclass(eq=True, frozen=True)
 class Coin:
     parent_coin_name: bytes32
     puzzle_hash: bytes32
     amount: int
 
-    def __hash__(self) -> int:
-        return hash(self.name())
-
     def name(self) -> bytes32:
-        return bytes32(
+        v = bytes32(
             hashlib.sha256(
                 self.parent_coin_name + self.puzzle_hash + as_clvm_int(self.amount)
             ).digest()
         )
+        if v == POISON:
+            breakpoint()
+        return v
 
 
 @dataclass
@@ -60,7 +65,7 @@ class Schema(Protocol):
 
     def coin_infos_for_coin_names(self, coin_name: list[bytes32]) -> list[CoinInfo]: ...
 
-    def block_info_for_block_index(self, block_index: int) -> BlockSpendInfo: ...
+    def block_info_for_block_index(self, block_index: int) -> None | BlockSpendInfo: ...
 
     def rewind_to_block_index(self, block_index: int) -> None: ...
 

@@ -4,6 +4,11 @@ Ideas for a v3 version of the DB that has better performance characteristics.
 * coin_record
 
 
+`Schema`: `Protocol` representing proposed schema for coin_record table.
+  - blockchain_v2_mainnet.py: a `Schema` that can read existing blockchain_v2_mainnet.db files.
+
+dump_blocks: tool to dump a replay file from an instance of a `Schema`
+load_blocks: tool to load a replay file from an instance of a `Schema`
 
 
 * NOTES:

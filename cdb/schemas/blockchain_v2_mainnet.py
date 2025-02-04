@@ -1,32 +1,12 @@
-from typing import Any, Callable, Generator, Iterable, List, Set, TypeVar
+from typing import Any, Generator, Iterable
 
 import pathlib
 import sqlite3
 
-from .schema import Schema, BlockSpendInfo, CoinInfo, Coin, bytes32
+from cdb.schema import Schema, BlockSpendInfo, CoinInfo, Coin, bytes32
 
 
 __all__ = ["REPLAY"]
-
-# Define a TypeVar for the objects
-T = TypeVar("T")
-
-
-def list_int_to_bytes(items: list[int]) -> bytes:
-    return b"".join(x.to_bytes(8, "big") for x in items)
-
-
-def list_int_from_bytes(b: bytes) -> list[int]:
-    return [int.from_bytes(b[i : i + 8], "big") for i in range(0, len(b), 8)]
-
-
-def as_coinbase_index(coin_name: bytes32) -> None | int:
-    if all(_ == 0 for _ in coin_name[16:24]):
-        v = int.from_bytes(coin_name[16:], "big") << 8
-        v |= coin_name[0]
-        v = -v
-        return v
-    return None
 
 
 def coin_for_row(row: tuple[Any, ...]) -> Coin:
@@ -35,49 +15,6 @@ def coin_for_row(row: tuple[Any, ...]) -> Coin:
         puzzle_hash=row[2],
         amount=int.from_bytes(row[3], "big"),
     )
-
-
-def topological_sort(
-    objects: Set[T], fetch_dependencies: Callable[[T], Iterable[T]]
-) -> List[T]:
-    """
-    Perform a topological sort on a set of objects with dependencies.
-
-    Args:
-        objects: A set of objects to sort.
-        fetch_dependencies: A function that returns the dependencies of a given object.
-
-    Returns:
-        A list of objects in a valid processing order.
-    """
-    # Result list to store the sorted order
-    result: List[T] = []
-    # Set to keep track of visited nodes to avoid reprocessing
-    visited: Set[T] = set()
-    # Set to detect cycles (temporary marking during DFS)
-    temp_marked: Set[T] = set()
-
-    def visit(node: T) -> None:
-        """
-        Recursive helper function to perform DFS and add nodes to the result.
-        """
-        if node in temp_marked:
-            raise ValueError("Cycle detected in the dependency graph")
-        if node not in visited:
-            temp_marked.add(node)
-            # Fetch dependencies and visit them recursively
-            for dependency in fetch_dependencies(node):
-                visit(dependency)
-            temp_marked.remove(node)
-            visited.add(node)
-            result.append(node)
-
-    # Iterate over all objects and start DFS if not visited
-    for obj in objects:
-        if obj not in visited:
-            visit(obj)
-
-    return result
 
 
 def is_coinbase(coin: Coin) -> bool:
@@ -110,6 +47,9 @@ class SQLiteReplay_v2(Schema):
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS coin_parent_index on coin_record(coin_parent)"
         )
+
+    def flush(self) -> None:
+        self._conn.commit()
 
     def accept_block(self, block_spend_info: BlockSpendInfo) -> None:
         cursor = self._conn.cursor()
