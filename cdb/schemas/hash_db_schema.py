@@ -8,7 +8,7 @@ import sqlite3
 from cdb.row_array_storage import RowArrayStorage
 from cdb.hashdb.sqlite3_row_array_storage import SQLite3RowStorage
 
-from cdb.hashdb.flat_file_array_storage import FlatFileDB
+from cdb.hashdb.flat_file_array_storage import FlatFileArrayStorage
 
 # from .flat_file_db import FlatFileDB as HashDB, Row
 from cdb.schema import (
@@ -35,7 +35,10 @@ COINBASE_PREFIXES = [
 
 COINBASE_PREFIX_LOOKUP = {_[1]: _[0] for _ in enumerate(COINBASE_PREFIXES)}
 
-DEBUG_COIN = bytes32.fromhex("75043187b316d5f8d5a9dd8bfb26058e57db4f741e3404557b14525600685c94")
+DEBUG_COIN = bytes32.fromhex(
+    "75043187b316d5f8d5a9dd8bfb26058e57db4f741e3404557b14525600685c94"
+)
+
 
 def list_int_to_bytes(items: list[int]) -> bytes:
     return b"".join(x.to_bytes(8, "big") for x in items)
@@ -239,7 +242,7 @@ class BaseDBSchema(Schema):
                 coin_names_remaining.append(coin_name)
             else:
                 d[coin_name] = v
-        #if DEBUG_COIN in coin_names_remaining:
+        # if DEBUG_COIN in coin_names_remaining:
         #    breakpoint()
         #    self._row_array_db.find_hashes([DEBUG_COIN])
         d1 = dict(self._row_array_db.find_hashes(coin_names_remaining))
@@ -324,6 +327,6 @@ PATH = pathlib.Path("./hash_db_root")
 # if PATH.exists():
 #    raise FileExistsError(f"{PATH} already exists")
 
-FFREPLAY = BaseDBSchema(PATH, FlatFileDB)
+FFREPLAY = BaseDBSchema(PATH, FlatFileArrayStorage)
 
 SQLREPLAY = BaseDBSchema(PATH, SQLite3RowStorage)

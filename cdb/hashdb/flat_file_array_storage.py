@@ -8,14 +8,14 @@ from cdb.row_array_storage import RowArrayStorage
 from cdb.schema import Row
 
 
-class FlatFileDB(RowArrayStorage):
+class FlatFileArrayStorage(RowArrayStorage):
     ROW_FORMAT = ">32sQ"  # 32-byte hash (bytes32) + 8-byte uint64
     ROW_SIZE = struct.calcsize(ROW_FORMAT)
 
     @classmethod
     def create_with_rows(
         cls, file_path: Path, sorted_rows: Iterable[Row]
-    ) -> "FlatFileDB":
+    ) -> "FlatFileArrayStorage":
         # print(f"path = {file_path}")
         with file_path.open("wb") as f:
             for row in sorted_rows:
@@ -34,12 +34,14 @@ class FlatFileDB(RowArrayStorage):
             while chunk := f.read(self.ROW_SIZE):
                 yield struct.unpack(self.ROW_FORMAT, chunk)
 
-    def read_row(self, index: int) -> Row:
+    def read_rows(self, index: int, count: int) -> list[Row]:
         with self._file_path.open("rb") as f:
             f.seek(index * self.ROW_SIZE)
-            chunk = f.read(self.ROW_SIZE)
+            chunk = f.read(self.ROW_SIZE * count)
             try:
-                return struct.unpack(self.ROW_FORMAT, chunk)
+                items = struct.unpack(self.ROW_FORMAT * count, chunk)
+                pairs = [(items[i], items[i + 1]) for i in range(0, len(items), 2)]
+                return pairs
             except struct.error:
                 breakpoint()
 

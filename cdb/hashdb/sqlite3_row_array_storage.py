@@ -47,11 +47,17 @@ class SQLite3RowStorage(RowArrayStorage):
     def row_count(self) -> int:
         return self._row_count
 
-    def read_row(self, index: int) -> Row:
+    def read_rows(self, index: int, count: int) -> list[Row]:
         one_based_index = index + 1
         cursor = self._conn.cursor()
-        cursor.execute("SELECT hash, hash_index FROM hashes WHERE rowid = ?", (one_based_index,))
-        return cursor.fetchone()
+        rowid_max = one_based_index + count
+        cursor.execute(
+            "SELECT hash, hash_index FROM hashes WHERE rowid >= ? AND rowid < ?",
+            (one_based_index, rowid_max),
+        )
+        rows = list(cursor.fetchall())
+        assert len(rows) == count
+        return rows
 
     def requery_count(self) -> int:
         cursor = self._conn.cursor()
@@ -62,5 +68,6 @@ class SQLite3RowStorage(RowArrayStorage):
         cursor = self._conn.cursor()
         cursor.execute("SELECT hash, hash_index FROM hashes")
         return cursor
+
 
 t = SQLite3RowStorage.create_with_rows(Path("test.db"), [])
