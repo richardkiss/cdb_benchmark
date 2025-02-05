@@ -25,8 +25,11 @@ class RowArrayStorage(ABC):
     @abstractmethod
     def read_rows(self, index: int, count: int) -> list[Row]: ...
 
-    def read_row(self, index: int) -> Row:
-        return self.read_rows(index, 1)[0]
+    def read_row(self, index: int) -> None | Row:
+        rows = self.read_rows(index, 1)
+        if rows:
+            return rows[0]
+        return None
 
     @abstractmethod
     def requery_count(self) -> int: ...

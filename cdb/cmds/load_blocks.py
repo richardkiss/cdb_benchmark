@@ -58,13 +58,14 @@ def instantiate_schema(module_with_schema: str) -> Schema:
 
 
 def load_blocks(f: TextIO, module_with_schema: str, max_block_index: int) -> None:
+    FREQUENCY = 1000
     schema = instantiate_schema(module_with_schema)
     last_block_index = 0
     for block_spend_info in parse_blocks(f):
         block_index = block_spend_info.index
         if block_index > max_block_index:
             break
-        if last_block_index // 1000 < block_index // 1000:
+        if last_block_index // FREQUENCY < block_index // FREQUENCY:
             print(f"accepted block {block_index}")
         schema.accept_block(block_spend_info)
         last_block_index = block_index

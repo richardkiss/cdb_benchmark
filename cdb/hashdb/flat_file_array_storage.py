@@ -9,7 +9,7 @@ from cdb.schema import Row
 
 
 class FlatFileArrayStorage(RowArrayStorage):
-    ROW_FORMAT = ">32sQ"  # 32-byte hash (bytes32) + 8-byte uint64
+    ROW_FORMAT = "32sQ"  # 32-byte hash (bytes32) + 8-byte uint64
     ROW_SIZE = struct.calcsize(ROW_FORMAT)
 
     @classmethod
@@ -38,8 +38,9 @@ class FlatFileArrayStorage(RowArrayStorage):
         with self._file_path.open("rb") as f:
             f.seek(index * self.ROW_SIZE)
             chunk = f.read(self.ROW_SIZE * count)
+            read_count = len(chunk) // self.ROW_SIZE
             try:
-                items = struct.unpack(self.ROW_FORMAT * count, chunk)
+                items = struct.unpack(self.ROW_FORMAT * read_count, chunk)
                 pairs = [(items[i], items[i + 1]) for i in range(0, len(items), 2)]
                 return pairs
             except struct.error:

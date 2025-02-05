@@ -106,7 +106,7 @@ def _find_hashes_inner_bs(
         lower_bound = mid + 1
 
 
-def find_hashes(
+def find_hashes_old(
     self: RowArrayStorage, hs: list[bytes32]
 ) -> tuple[list[Row], set[bytes32]]:
     # we use binary search and the fact that rows are ordered by hash
@@ -114,6 +114,97 @@ def find_hashes(
     # return self._find_hashes_inner(hs) #, self._row_count, 0, acc)
     missing: set[bytes32] = set()
     _find_hashes_inner_bs(self, hs, 0, self.row_count(), acc, missing)
+    return acc, missing
+
+
+def find_hashes(
+    self: RowArrayStorage, hs: list[bytes32]
+) -> tuple[list[Row], set[bytes32]]:
+    # return find_hashes_old(self, hs)
+    deduped_hs = set(hs)
+    sorted_queries = sorted(deduped_hs)
+    acc: list[Row] = []
+    missing: set[bytes32] = set()
+
+    if not sorted_queries:
+        return acc, missing
+
+    def hash_to_int(b: bytes32) -> int:
+        return int.from_bytes(b[:8], "big")
+
+    # Precompute min/max hashes using batch reads
+    min_hash_index = 0
+    min_hash = self.read_rows(0, 1)[0][0]
+    min_hash_int = hash_to_int(min_hash)
+    max_hash_index = self.row_count() - 1
+    if max_hash_index < 0:
+        return acc, set(hs)
+    max_hash = self.read_rows(max_hash_index, 1)[0][0]
+    max_hash_int = hash_to_int(max_hash) + 1
+
+    block_size = 64
+
+    for h in sorted_queries:
+        found = False
+
+        if h < min_hash or h > max_hash:
+            missing.add(h)
+            continue
+
+        # Interpolation position estimation
+        h_int = hash_to_int(h)
+        delta_int = max_hash_int - min_hash_int
+
+        index_estimate = (
+            min_hash_index
+            + (h_int - min_hash_int) * (max_hash_index - min_hash_index) // delta_int
+        )
+
+        # Align to block boundaries
+        aligned_index = (
+            (index_estimate - (block_size // 2)) // block_size
+        ) * block_size
+
+        rows_to_read = block_size
+        aligned_index = max(0, aligned_index)
+        aligned_index = min(self.row_count() - rows_to_read, aligned_index)
+
+        while True:
+            # Batch read entire block
+            rows = self.read_rows(aligned_index, rows_to_read)
+            if not rows:
+                breakpoint()
+
+            if rows[0][0] > h:
+                # back up
+                aligned_index -= block_size
+                rows_to_read += block_size
+                continue
+            if rows[-1][0] < h:
+                # skip ahead
+                rows_to_read += block_size
+                continue
+            break
+
+        # Binary search within cached block
+        left, right = 0, len(rows) - 1
+        while left <= right:
+            mid = (left + right) // 2
+            mid_hash = rows[mid][0]
+            if mid_hash == h:
+                acc.append((h, rows[mid][1]))
+                found = True
+                break
+            elif mid_hash < h:
+                left = mid + 1
+            else:
+                right = mid - 1
+
+        min_hash_int = hash_to_int(mid_hash)
+        min_hash_index = aligned_index + mid
+
+        if not found:
+            missing.add(h)
     return acc, missing
 
 

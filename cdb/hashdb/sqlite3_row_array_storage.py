@@ -56,7 +56,6 @@ class SQLite3RowStorage(RowArrayStorage):
             (one_based_index, rowid_max),
         )
         rows = list(cursor.fetchall())
-        assert len(rows) == count
         return rows
 
     def requery_count(self) -> int:
