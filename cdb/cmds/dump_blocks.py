@@ -5,7 +5,7 @@ import importlib
 import sys
 
 
-from .schema import BlockSpendInfo, Schema
+from cdb.schema import BlockSpendInfo, Schema
 
 
 def instantiate_schema(module_with_schema: str) -> Schema:

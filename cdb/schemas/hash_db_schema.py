@@ -6,9 +6,7 @@ import sqlite3
 # from .hash_db import HashDB, Row, HashDBProtocol
 
 from cdb.row_array_storage import RowArrayStorage
-from cdb.hashdb.sqlite3_row_array_storage import SQLite3RowStorage
 
-from cdb.hashdb.flat_file_array_storage import FlatFileArrayStorage
 
 # from .flat_file_db import FlatFileDB as HashDB, Row
 from cdb.schema import (
@@ -136,7 +134,7 @@ class BaseDBSchema(Schema):
                 missing_coin_names.append(coin_name)
             else:
                 name_id_tuples.append((coin_name, v))
-        return name_id_tuples, missing_coin_names
+        return name_id_tuples, set(missing_coin_names)
 
     def _store_block(
         self,
@@ -161,10 +159,16 @@ class BaseDBSchema(Schema):
             parent_names, unflushed_coin_lookup
         )
 
-        coin_ids_by_name: dict[bytes32, int] = self._fetch_coin_indices_for_coin_names(
-            missing_coin_names, unflushed_coin_lookup
+        # we store the parent coin ids rather than their names
+        # so we have to look up all the parent coin ids
+        # if the parents are created in this block, we will not find them
+        # but we do a topological sort, so we find them later but before we need them
+        parent_coin_ids_by_name: dict[bytes32, int] = (
+            self._fetch_coin_indices_for_coin_names(
+                missing_coin_names, unflushed_coin_lookup
+            )
         )
-        coin_ids_by_name.update(dict(name_id_tuples))
+        parent_coin_ids_by_name.update(dict(name_id_tuples))
 
         sorted_confirms = topological_sort(
             set(block_spend_info.confirms),
@@ -173,11 +177,13 @@ class BaseDBSchema(Schema):
             else [],
         )
 
+        spend_id_set = set(block_spend_info.spends)
+
         for coin in sorted_confirms:
             pcn = coin.parent_coin_name
             parent_index = as_coinbase_index(pcn)
             if parent_index is None:
-                parent_index = coin_ids_by_name.get(pcn)
+                parent_index = parent_coin_ids_by_name.get(pcn)
             if parent_index is None:
                 breakpoint()
                 raise ValueError(f"can't find coin id for parent coin {pcn}")
@@ -185,22 +191,29 @@ class BaseDBSchema(Schema):
             coin_name = coin.name()
             # add the coin to the coin and coin_lookup tables
             coin_amount_as_bytes = coin.amount.to_bytes(8, "big")
+            spent_block_index = block_index if coin_name in spend_id_set else 0
             cursor.execute(
-                "INSERT INTO coin (parent, puzzle, amount, confirmed, spent) VALUES (?, ?, ?, ?, 0)",
-                (parent_index, coin.puzzle_hash, coin_amount_as_bytes, block_index),
+                "INSERT INTO coin (parent, puzzle, amount, confirmed, spent) VALUES (?, ?, ?, ?, ?)",
+                (
+                    parent_index,
+                    coin.puzzle_hash,
+                    coin_amount_as_bytes,
+                    block_index,
+                    spent_block_index,
+                ),
             )
             coin_lookup_index = cursor.lastrowid
             assert coin_lookup_index is not None
             unflushed_coin_lookup[coin_name] = coin_lookup_index
             confirm_ids.append(coin_lookup_index)
-            coin_ids_by_name[coin_name] = coin_lookup_index
+            parent_coin_ids_by_name[coin_name] = coin_lookup_index
 
         spend_id_by_name = self._fetch_coin_indices_for_coin_names(
             block_spend_info.spends, unflushed_coin_lookup
         )
         spend_ids = [_[1] for _ in spend_id_by_name.items()]
 
-        # TODO: do the `INSERT` above with the correct value
+        # TODO: don't update the coins that were spent in this block
         for _ in spend_ids:
             cursor.execute("UPDATE coin SET spent=? WHERE id=?", (block_index, _))
 
@@ -228,7 +241,7 @@ class BaseDBSchema(Schema):
     ###
 
     def _fetch_coin_indices_for_coin_names(
-        self, coin_names: list[bytes32], unflushed_coin_lookup: dict[bytes32, int]
+        self, coin_names: Iterable[bytes32], unflushed_coin_lookup: dict[bytes32, int]
     ) -> dict[bytes32, int]:
         coin_names_remaining = []
 
@@ -247,11 +260,6 @@ class BaseDBSchema(Schema):
         #    self._row_array_db.find_hashes([DEBUG_COIN])
         d1 = dict(self._row_array_db.find_hashes(coin_names_remaining))
         d.update(d1)
-        if set(d.keys()) != set(coin_names):
-            missing = set(coin_names) - set(d.keys())
-            print(f"missing {missing}")
-            breakpoint()
-
         return d
 
     def _coin_index_for_coin_name(
@@ -321,12 +329,3 @@ class BaseDBSchema(Schema):
             confirm_ids = list_int_from_bytes(row[3])
             confirms = self._coins_for_coin_indices(confirm_ids)
             yield BlockSpendInfo(block_index, timestamp, spends, confirms)
-
-
-PATH = pathlib.Path("./hash_db_root")
-# if PATH.exists():
-#    raise FileExistsError(f"{PATH} already exists")
-
-FFREPLAY = BaseDBSchema(PATH, FlatFileArrayStorage)
-
-SQLREPLAY = BaseDBSchema(PATH, SQLite3RowStorage)

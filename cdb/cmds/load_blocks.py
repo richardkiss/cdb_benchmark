@@ -58,7 +58,7 @@ def instantiate_schema(module_with_schema: str) -> Schema:
 
 
 def load_blocks(f: TextIO, module_with_schema: str, max_block_index: int) -> None:
-    FREQUENCY = 1000
+    FREQUENCY = 50000
     schema = instantiate_schema(module_with_schema)
     last_block_index = 0
     for block_spend_info in parse_blocks(f):

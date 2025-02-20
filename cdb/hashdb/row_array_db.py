@@ -280,9 +280,7 @@ class RowArrayDB:
             found, missing = find_hashes(db, pending)
             acc.update(found)
             pending = list(missing)
-        if len(pending) > 0:
-            breakpoint()
-        return [(h, acc[h]) for h in hs]
+        return [(h, acc[h]) for h in hs if h in acc]
 
     def _select_db_files_to_merge(self) -> List[Tuple[Path, RowArrayStorage]]:
         """
@@ -301,12 +299,14 @@ class RowArrayDB:
             return
 
         merged_db_path = self.new_db_name()
-        print(f"Merging {path_db_list[0][0]} and {path_db_list[1][0]} into {merged_db_path}")
+        print(
+            f"Merging {path_db_list[0][0]} and {path_db_list[1][0]} into {merged_db_path}"
+        )
         db_list = [_[1] for _ in path_db_list]
         size = sum(1 for _ in sorted_merged_rows(db_list, merged_db_path))
         if size != sum(db.row_count() for db in db_list):
             breakpoint()
-        #assert size == sum(db.row_count() for db in db_list)
+        # assert size == sum(db.row_count() for db in db_list)
         merged_db = self._row_array_storage_class.create_with_rows(
             merged_db_path, sorted_merged_rows(db_list, merged_db_path)
         )

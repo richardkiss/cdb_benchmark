@@ -18,7 +18,7 @@ class SQLite3RowStorage(RowArrayStorage):
     ) -> "SQLite3RowStorage":
         conn = sqlite3.connect(file_path)
         # breakpoint()
-        conn.execute("PRAGMA synchronouse = OFF")
+        conn.execute("PRAGMA synchronous = OFF")
         conn.execute("PRAGMA journal_mode = MEMORY")
         # conn.execute("PRAGMA page_size = 131072")
         cursor = conn.cursor()
