@@ -9,7 +9,8 @@ from cdb.schema import (
     Row,
 )
 
-from cdb.rocks.rocksdb import RocksDB
+from rocks_pyo3 import DB
+
 from cdb.schemas.hash_db_schema import BaseDBSchema
 
 __all__ = ["REPLAY"]
@@ -54,7 +55,7 @@ class RocksDBSchema(BaseDBSchema):
 class RocksHashDB:
     def __init__(self, path: pathlib.Path):
         self._path = path
-        self._rocks_db = RocksDB(path / "rocks_db")
+        self._rocks_db = DB(str(path / "rocks_db"))
 
     def add_rows(self, rows: list[Row]) -> None:
         for row in rows:
