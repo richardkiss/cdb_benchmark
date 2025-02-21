@@ -71,11 +71,11 @@ class RocksHashDB:
             # assert r1 == v_blob
 
     def find_hashes(self, hs: list[bytes32]) -> list[Row]:
-        r = []
+        r: list[Row] = []
         if len(hs) == 0:
             return r
-        for h in hs:
-            v = self._rocks_db.get(h)
+        vs = self._rocks_db.multi_get(hs)
+        for h, v in zip(hs, vs):
             if v is None:
                 continue
             v_int = int.from_bytes(v, "big")
