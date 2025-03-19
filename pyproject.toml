@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "cdb"
 version = "0.0.1"
 description = "Benchmarking different database schema designs for Chia's coin database"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 dependencies = [
     "rocks_pyo3 @ git+https://github.com/richardkiss/rocks_pyo3.git",
     "cffi>=1.15.0",
