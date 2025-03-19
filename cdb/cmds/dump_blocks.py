@@ -1,19 +1,10 @@
 from typing import TextIO
 
 import argparse
-import importlib
 import sys
 
 
-from cdb.schema import BlockSpendInfo, Schema
-
-
-def instantiate_schema(module_with_schema: str) -> Schema:
-    module_name, _class = module_with_schema.split(":")
-
-    module = importlib.import_module(module_name)
-    v = getattr(module, _class)
-    return v
+from cdb.schema import BlockSpendInfo, Schema, instantiate_schema
 
 
 def print_block_replay(

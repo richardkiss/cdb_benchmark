@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, List, Protocol, Set, TypeVar
 
 import hashlib
+import importlib
 
 
 class bytes32(bytes):
@@ -24,7 +25,11 @@ def as_clvm_int(v: int) -> bytes:
     return v.to_bytes(size, "big", signed=True)
 
 
-POISON = bytes32.fromhex("166894134a1b956cccaacd6d6bec503e5975d5a2e7c803677ca6671853b07084") + b"\x00"
+POISON = (
+    bytes32.fromhex("166894134a1b956cccaacd6d6bec503e5975d5a2e7c803677ca6671853b07084")
+    + b"\x00"
+)
+
 
 @dataclass(eq=True, frozen=True)
 class Coin:
@@ -116,3 +121,15 @@ def topological_sort(
             visit(obj)
 
     return result
+
+
+def instantiate_schema(module_with_schema: str) -> Schema:
+    if ":" in module_with_schema:
+        module_name, _class = module_with_schema.split(":")
+    else:
+        module_name = module_with_schema
+        _class = "REPLAY"
+
+    module = importlib.import_module(module_name)
+    v = getattr(module, _class)
+    return v

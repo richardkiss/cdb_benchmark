@@ -4,7 +4,7 @@ import argparse
 import importlib
 import sys
 
-from cdb.schema import BlockSpendInfo, Coin, Schema, bytes32
+from cdb.schema import BlockSpendInfo, Coin, Schema, bytes32, instantiate_schema
 
 """
 B block_index timestamp spend_count confirm_count
@@ -47,14 +47,6 @@ def parse_blocks(f: TextIO) -> Iterable[BlockSpendInfo]:
             yield block_spend_info
         else:
             raise ValueError(f"Unexpected line: {line}")
-
-
-def instantiate_schema(module_with_schema: str) -> Schema:
-    module_name, _class = module_with_schema.split(":")
-
-    module = importlib.import_module(module_name)
-    v = getattr(module, _class)
-    return v
 
 
 def load_blocks(f: TextIO, module_with_schema: str, max_block_index: int) -> None:
