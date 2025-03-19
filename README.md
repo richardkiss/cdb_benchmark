@@ -33,8 +33,8 @@ Chia's coin database currently uses SQLite3 with bytes32 SHA256 hash primary key
 
 1. Clone this repository:
 ```bash
-git clone <repository-url>
-cd chia-db-benchmark
+git clone https://github.com/richardkiss/cdb_benchmark
+cd cdb_benchmark
 ```
 
 2. Install uv (if not already installed):
